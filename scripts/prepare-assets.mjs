@@ -26,6 +26,8 @@ async function scan(directory) {
 for (const directory of ['components', 'pages', 'public/data', 'data']) await scan(directory);
 const names = new Set([...source.matchAll(/\bfa-([a-z0-9-]+)/g)].map(match => match[1]));
 const iconAliases = { hamburger: 'burger', 'shield-alt': 'shield-halved' };
+// CMS content can still use these legacy names even when source JSX no longer does.
+for (const name of Object.keys(iconAliases)) names.add(name);
 const rules = ['/* Font Awesome Free 6.5.1 — Fonticons, Inc. — Icons: CC BY 4.0 https://fontawesome.com/license/free */', '.fa,.fas,.far,.fab,.fa-solid,.fa-regular,.fa-brands{display:inline-block;font-style:normal;line-height:1}',
   '.fa:before,.fas:before,.far:before,.fab:before,.fa-solid:before,.fa-regular:before,.fa-brands:before{content:"";display:inline-block;width:1em;height:1em;vertical-align:-.125em;background:currentColor;mask:var(--fa-icon) center/contain no-repeat;-webkit-mask:var(--fa-icon) center/contain no-repeat}'];
 for (const name of names) {

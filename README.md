@@ -25,6 +25,17 @@ npm start
 
 Guest forms save locally before opening WhatsApp or an email composer. Guests must send the prepared message in that app. A saved request is pending, rather than a confirmed reservation.
 
+## Login profiles
+
+Both profiles sign in at `/admin/login` and use separate passwords:
+
+- **Administrator** uses `ADMIN_PASSWORD` and retains all existing management features.
+- **Rooms & bookings** uses `STAFF_PASSWORD` and can view `/admin/overview` and `/admin/stays`. Staff cannot edit records, upload images, access expenses or guest messages, or retrieve management data through APIs. Staff booking views include guest names, room information, dates, guest counts, and status; contact details, payments, and private notes are omitted.
+
+Set `STAFF_PASSWORD` as a Production secret in the existing Vercel project and redeploy. Choose a strong password different from `ADMIN_PASSWORD`. Leaving it unset disables staff sign-in; there is no fallback staff password. Changing a role's password invalidates its existing sessions. Both roles require the configured `ADMIN_SESSION_SECRET` and expire after 12 hours.
+
+The overview combines active booking dates with room availability settings. Maintenance and hold take priority. Counts reflect configured room listings, which may represent room types rather than individual physical rooms. Pending requests are counted as reserved while active; use the displayed booking status to distinguish them from confirmed stays.
+
 ## Supabase storage
 
 The server supports `LOTUS_STORAGE_DRIVER=supabase` for persistent hosting. Follow [SUPABASE-SETUP.md](SUPABASE-SETUP.md) to install both schema migrations, import existing content, configure server secrets, and check the connection. Site/room configuration uses versioned JSONB documents. Bookings, messages, expenses, blogs and authors use indexed individual rows in `lotus_records`, with atomic record mutations and paginated admin queries.

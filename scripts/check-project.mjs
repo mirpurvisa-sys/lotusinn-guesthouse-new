@@ -21,8 +21,9 @@ await once(socket, 'listening');
 const port = socket.address().port;
 await new Promise(resolve => socket.close(resolve));
 const password = crypto.randomUUID();
+const staffPassword = crypto.randomUUID();
 const server = spawn(process.execPath, ['node_modules/next/dist/bin/next', 'start', '--hostname', '127.0.0.1', '--port', String(port)], {
-  env: { ...process.env, NODE_ENV: 'production', LOTUS_STORAGE_DRIVER: 'json', ADMIN_PASSWORD: password, ADMIN_SESSION_SECRET: crypto.randomUUID(), LOTUS_DATA_DIR: directory, LOTUS_PUBLIC_DATA_DIR: publicDirectory, LOTUS_MEDIA_DIR: path.join(directory, 'uploads') },
+  env: { ...process.env, NODE_ENV: 'production', LOTUS_STORAGE_DRIVER: 'json', ADMIN_PASSWORD: password, STAFF_PASSWORD: staffPassword, ADMIN_SESSION_SECRET: crypto.randomUUID(), LOTUS_DATA_DIR: directory, LOTUS_PUBLIC_DATA_DIR: publicDirectory, LOTUS_MEDIA_DIR: path.join(directory, 'uploads') },
   stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
 });
 let logs = '';
@@ -259,6 +260,35 @@ try {
   await request(`/blog/${blog.slug}`, { status: 404 });
   await request('/api/admin/authors', { method: 'DELETE', admin: true, body: { id: author.id } });
   await request(`/authors/${author.slug}`, { status: 404 });
+  // Role boundaries: use the real HTTP login and attempt both pages and direct APIs.
+  const administratorCookie = cookie;
+  assert.equal((await (await request('/api/admin/session', { admin: true })).json()).role, 'admin');
+  await request('/api/admin/login', { method: 'POST', body: { role: 'staff', password }, status: 401 });
+  await request('/api/admin/login', { method: 'POST', body: { role: 'admin', password: staffPassword }, status: 401 });
+  await request('/api/admin/login', { method: 'POST', body: { role: 'owner', password }, status: 400 });
+  const staffLogin = await request('/api/admin/login', { method: 'POST', body: { role: 'staff', password: staffPassword, next: '/admin/images' } });
+  assert.deepEqual(await staffLogin.json(), { success: true, role: 'staff', destination: '/admin/overview' });
+  cookie = staffLogin.headers.get('set-cookie').split(';')[0];
+  assert.equal((await (await request('/api/admin/session', { admin: true })).json()).role, 'staff');
+  for (const route of ['/admin/overview', '/admin/stays']) {
+    await request(route, { admin: true });
+    const data = await (await request('/api/admin/page?path=' + encodeURIComponent(route), { admin: true })).json();
+    assert.doesNotMatch(JSON.stringify(data), /"email"|"phone"|"amount"|"notes"|"roomPrice"|"messages"/);
+  }
+  for (const route of ['/admin', '/admin/images', '/admin/rooms', '/admin/bookings', '/admin/expenses', '/admin/messages', '/admin/blogs/new', '/admin/authors/edit']) {
+    assert.equal(new URL((await request(route, { admin: true, status: 307 })).headers.get('location'), base).pathname, '/admin/overview');
+    await request('/api/admin/page?path=' + encodeURIComponent(route), { admin: true, status: 403 });
+  }
+  for (const api of ['rooms', 'bookings', 'expenses', 'messages', 'blogs', 'authors', 'images', 'images/upload', 'media']) {
+    for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) await request(`/api/admin/${api}`, { method, admin: true, ...(method === 'GET' ? {} : { body: { role: 'admin' } }), status: 403 });
+  }
+  await request('/api/admin/page?path=/admin/overview', { method: 'POST', admin: true, body: {}, status: 405 });
+  await request('/api/admin/page?path=/admin/overview/../images', { admin: true, status: 403 });
+  const forged = cookie.replace('.staff.', '.admin.');
+  await request('/api/admin/session', { headers: { Cookie: forged }, status: 401 });
+  await request('/api/admin/logout', { method: 'POST', admin: true });
+  cookie = administratorCookie;
+  for (const route of ['/admin', '/admin/images', '/admin/overview', '/admin/stays']) await request('/api/admin/page?path=' + encodeURIComponent(route), { admin: true });
   await request('/api/admin/logout', { method: 'POST', admin: true });
   console.log(`Passed ${checks} integration checks: routes, authentication, guest submissions, concurrent writes, booking changes, expenses, and blog/author publishing.`);
 } catch (error) {

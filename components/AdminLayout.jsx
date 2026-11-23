@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import SiteImage from './SiteImage';
 import { adminRequest } from '../lib/adminClient.js';
 import styles from '../styles/admin.module.css';
+import { canAccessAdminPage, roleHome } from '../lib/adminRoles.js';
 
 const ShellContext = createContext(null);
 export default function AdminLayout({ children, title, contentSection = false }) {
@@ -13,6 +14,8 @@ export default function AdminLayout({ children, title, contentSection = false })
 }
 
 const navItems = [
+  { href: "/admin/overview", label: "Room Overview", icon: "fa-solid fa-door-open" },
+  { href: "/admin/stays", label: "Booking Information", icon: "fa-solid fa-calendar-check" },
   { href: "/admin/images", label: "Website Images", icon: "fa-solid fa-images" },
   { href: "/admin", label: "Dashboard", icon: "fa-solid fa-table-columns" },
   { href: "/admin/rooms", label: "Rooms Management", icon: "fa-solid fa-bed" },
@@ -34,9 +37,30 @@ export function AdminShell({ children, login = false }) {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [pageSearch, setPageSearch] = useState('');
+  const [session, setSession] = useState(null);
+  const [sessionError, setSessionError] = useState('');
+  const [sessionAttempt, setSessionAttempt] = useState(0);
+  useEffect(() => {
+    if (login) { setSession(null); return; }
+    let active = true;
+    adminRequest('/api/admin/session').then(async response => {
+      if (response.status === 401) { window.location.replace(`/admin/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`); return; }
+      if (!response.ok) throw new Error('Unable to check your login. Please try again.');
+      const data = await response.json();
+      if (active) { setSession(data); setSessionError(''); }
+    }).catch(error => { if (active) setSessionError(error.message); });
+    return () => { active = false; };
+  }, [login, sessionAttempt]);
+  useEffect(() => {
+    if (session && !canAccessAdminPage(session.role, router.pathname)) router.replace(roleHome(session.role));
+  }, [session, router.pathname, router]);
   const activeHref = navItems.filter(item => router.pathname === item.href || router.pathname.startsWith(item.href + '/')).sort((a,b) => b.href.length - a.href.length)[0]?.href;
 
   if (login) return <div className={styles.surface}>{children}</div>;
+  if (sessionError) return <div className={styles.surface}><main className="admin-panel" role="alert"><p>{sessionError}</p><button className="admin-btn" onClick={() => { setSessionError(''); setSessionAttempt(value => value + 1); }}>Try again</button></main></div>;
+  if (!session || !canAccessAdminPage(session.role, router.pathname)) return <div className={styles.surface}><main className="admin-panel admin-loading" role="status">Checking your access…</main></div>;
+  const isStaff = session.role === 'staff';
+  const allowedNav = navItems.filter(item => canAccessAdminPage(session.role, item.href));
 
   return (
     <ShellContext.Provider value={setMetadata}><div className={styles.surface}><div className={`admin-app ${contentSection || /\/admin\/(blogs|authors)/.test(router.pathname) ? "content-admin-app" : ""}`}>
@@ -53,12 +77,12 @@ export function AdminShell({ children, login = false }) {
 
           <div>
             <h1>Lotus Inn Guest House</h1>
-            <p>Admin Panel</p>
+            <p>{isStaff ? 'Rooms & Bookings' : 'Administrator Panel'}</p>
           </div>
         </div>
 
         <nav className="admin-nav" id="admin-navigation" aria-label="Admin navigation">
-          {navItems.filter(item => `${item.label} ${item.href}`.toLowerCase().includes(pageSearch.trim().toLowerCase())).map((item) => (
+          {allowedNav.filter(item => `${item.label} ${item.href}`.toLowerCase().includes(pageSearch.trim().toLowerCase())).map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -79,7 +103,7 @@ export function AdminShell({ children, login = false }) {
         <div className="admin-topbar">
           <div>
             <h2>
-              Welcome <span>Lotus Inn Admin</span>
+              Welcome <span>{isStaff ? 'Lotus Inn Staff' : 'Lotus Inn Admin'}</span>
             </h2>
 
             <p
@@ -124,9 +148,9 @@ export function AdminShell({ children, login = false }) {
                   <div className="dropdown-box">
                     <h4>Quick Links</h4>
                     <ul>
-                      <li><Link href="/admin/bookings">Review bookings</Link></li>
-                      <li><Link href="/admin/availability">Check room availability</Link></li>
-                      <li><Link href="/admin/messages">Read guest messages</Link></li>
+                      <li><Link href={isStaff ? '/admin/stays' : '/admin/bookings'}>Review bookings</Link></li>
+                      <li><Link href={isStaff ? '/admin/overview' : '/admin/availability'}>Check room availability</Link></li>
+                      {!isStaff && <li><Link href="/admin/messages">Read guest messages</Link></li>}
                     </ul>
                   </div>
                 )}
@@ -143,6 +167,7 @@ export function AdminShell({ children, login = false }) {
 
                 {showProfile && (
                   <div className="dropdown-box">
+                    <p className="admin-role-badge">{isStaff ? 'Staff · View only' : 'Administrator · Full access'}</p>
                     <Link href="/">
                       View Website
                     </Link>
